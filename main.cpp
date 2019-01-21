@@ -10,9 +10,13 @@ class SampleView : public BGLView
 {
 public:
 			SampleView(BRect rect, const char *name, ulong resizingMode, ulong options);
+			~SampleView();
 	virtual void	AttachedToWindow();
 	virtual void	DetachedFromWindow();
 	virtual void 	DrawFrame(bool noPause);
+
+	sem_id		m_drawEvent;
+	sem_id		m_quittingSem;
 private:
 	thread_id	m_drawThread;
 };
@@ -29,7 +33,7 @@ private:
 
 class SampleApplication : public BApplication {
 public:
-			SampleApplication(const char *sign);
+			SampleApplication();
 	virtual void	MessageReceived(BMessage *msg);
 private:
 	SampleWindow	*m_window;
@@ -42,9 +46,10 @@ static int32 summonThread(void *cookie)
 	SampleView *view = reinterpret_cast<SampleView *>(cookie);
 	BScreen screen(view->Window());
 
-	while (true)
+	while (acquire_sem_etc(view->m_quittingSem, 1, B_TIMEOUT, 0) == B_NO_ERROR)
 	{
 		view->DrawFrame(0);
+		release_sem(view->m_quittingSem);
 		screen.WaitForRetrace();
 	}
 	return 0;
@@ -53,7 +58,14 @@ static int32 summonThread(void *cookie)
 SampleView::SampleView(BRect rect, const char *name, ulong resizingMode, ulong options)
 : BGLView(rect, name, resizingMode, 0, options)
 {
+	m_quittingSem = create_sem(1, "quitting sem");
+	m_drawEvent = create_sem(0, "draw event");
+}
 
+SampleView::~SampleView()
+{
+	delete_sem(m_quittingSem);
+	delete_sem(m_drawEvent);
 }
 
 void SampleView::AttachedToWindow()
@@ -77,7 +89,10 @@ void SampleView::DetachedFromWindow()
 		Window()->Unlock();
 	}
 
+	acquire_sem(m_quittingSem);
+	release_sem(m_drawEvent);
 	wait_for_thread(m_drawThread, &dummy);
+	release_sem(m_quittingSem);
 
 	while (locks--)
 		Window()->Lock();
@@ -137,8 +152,8 @@ void SampleWindow::MessageReceived(BMessage *msg)
 	}
 }
 
-SampleApplication::SampleApplication(const char *sign)
-: BApplication(sign)
+SampleApplication::SampleApplication()
+: BApplication("application/x-vnd.Aragajaga.SampleApplication")
 {
 	m_window = new SampleWindow(BRect(64, 64, 640, 360), "SampleApplication", B_TITLED_WINDOW, 0);
 	m_window->Show();
@@ -156,7 +171,7 @@ void SampleApplication::MessageReceived(BMessage *msg)
 int main()
 {
 	try {
-		SampleApplication *app = new SampleApplication("application/x-vnd.Aragajaga.SampleApplication");
+		SampleApplication *app = new SampleApplication();
 		app->Run();
 		delete app;
 	}
