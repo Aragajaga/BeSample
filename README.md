@@ -1,1 +1,2 @@
-# BeSample
+# haiku-bootrap-application
+
